@@ -1,2 +1,1 @@
-# R
-Resources and projects related to using R
+# Analytics Project -- Creating the Finest Wine
