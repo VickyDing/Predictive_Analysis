@@ -1,0 +1,499 @@
+---
+title: "Group 6 ML Project"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intro to ML Project
+
+
+Import libraries and data set and set seed
+```{r}
+#Import libraries
+library(MASS)
+library(class)
+library(kknn)
+library(tree)
+library(randomForest)
+library(gbm)
+library(readr)
+library(leaps)
+library(data.table)
+library(jtools) 
+library(ggplot2)
+
+#Set seed for now
+set.seed(1)
+
+#Read data from csv
+df <- read.csv('winequality-red.csv', sep = ';')
+keep_qual = df$quality
+
+#Exploration of dataset
+head(df)
+nrow(df)
+colnames(df)
+summary(df)
+
+#Function to normalize dataset 
+keep_qual = df$quality
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x))) }
+df1 <- as.data.frame(lapply(df[0:11], normalize))
+df1$quality = keep_qual
+attach(df)
+```
+Create Training and Testing sets
+```{r}
+#Create random list of training values
+percentage_train = .8
+tr = sample(1:nrow(df), round(percentage_train * nrow(df)))
+
+#Divide data into train and test sets
+train = data.frame(df[tr, ])
+test = data.frame(df[-tr, ])
+```
+
+```{r}
+#Create random list of training values
+tr1 = sample(1:nrow(df1), round(percentage_train * nrow(df1)))
+
+#Divide data into train and test sets
+train1 = data.frame(df1[tr1, ])
+test1 = data.frame(df1[-tr1, ])
+```
+
+```{r}
+#########################################
+#     KNN test different KS             #
+#########################################
+
+##Real Data
+#Initialize list for MSE
+out_MSE = NULL
+
+n = nrow(test) - 1
+
+#Test all possible values for K
+for(i in 2 : n){
+  #Run KNN algorithm
+  near = kknn(quality~alcohol + sulphates + volatile.acidity + total.sulfur.dioxide,     train, test, k=i, kernel = "rectangular")
+  
+  #Calculate MSE
+  aux = mean((test[, 12] - near$fitted) ^ 2)
+  
+  #Append this loops MSE to vector
+  out_MSE = c(out_MSE, aux)
+}
+  
+#Find best value for k
+best = which.min(out_MSE)
+
+##Normalized Data
+#Initialize list for MSE
+out_MSE1 = NULL
+
+n1 = nrow(test1) - 1
+
+#Test all possible values for K
+for(i in 2 : n1){
+  #Run KNN algorithm
+  near1 = kknn(quality~alcohol + sulphates + volatile.acidity + total.sulfur.dioxide, train1, test1, k=i, kernel = "rectangular")
+  
+  #Calculate MSE
+  aux1 = mean((test1[, 12] - near1$fitted) ^ 2)
+  
+  #Append this loops MSE to vector
+  out_MSE1 = c(out_MSE1, aux1)
+}
+  
+#Find best value for k
+best1 = which.min(out_MSE1)
+
+#Plot k value vs complexity of f
+plot(log(1 / (1:(n - 1))), sqrt(out_MSE), xlab = "Complexity (log(1/k))", ylab = "out-of-sample RMSE", col = 4, lwd = 2, type = "l", cex.lab = 1.2, ylim = range(c(.55,.76 )))
+lines.default(log(1 / (1:(n1 - 1))), sqrt(out_MSE1), col = 'red', lwd = 2, cex.lab = 1.2)
+text(log(1 / best), sqrt(out_MSE[best]) + .01, paste("k=",best), col = 'black', cex = 1.2)
+text(log(1 / best1), sqrt(out_MSE1[best1]) + .015, paste("k=",best1), col = 'black', cex = 1.2)
+legend(-1.5, .76, legend=c("Real Data", "Normalized Data"),
+       col=c("blue", "red"), lty=1:2, cex=0.8)
+```
+
+```{r}
+#########################################
+#             KNN & K-fold              #
+#########################################
+
+#Choose number of sections
+kcv = 10
+
+##Real Data
+#Find number of observations per section
+n0 = round(nrow(df) / kcv, 0)
+out_MSE = matrix(0,kcv,100)
+used = NULL
+set = 1:nrow(df)
+
+for(j in 1:kcv){
+  
+  if(n0<length(set)){val = sample(set,n0)}
+  if(n0>=length(set)){val=set}
+  
+  train_i = df[-val,]
+  test_i = df[val,]
+  
+  for(i in 1:100){
+    
+    near = kknn(quality~alcohol + sulphates + volatile.acidity + total.sulfur.dioxide, train_i, test_i, k=i, kernel = "rectangular")
+    aux = mean((test_i[,12] - near$fitted)^2)
+    
+    out_MSE[j,i] = aux
+  }
+  
+  used = union(used,val)
+  set = (1:nrow(df))[-used]
+
+}
+
+mMSE = apply(out_MSE,2,mean)
+
+##Normalized Data
+#Find number of observations per section
+n01 = round(nrow(df1) / kcv, 0)
+out_MSE1 = matrix(0,kcv,100)
+used1 = NULL
+set1 = 1:nrow(df1)
+
+for(j in 1:kcv){
+  
+  if(n01<length(set1)){val1 = sample(set1,n01)}
+  if(n01>=length(set1)){val1 = set1}
+  
+  train_i1 = df1[-val1,]
+  test_i1 = df1[val1,]
+  
+  for(i in 1:100){
+    
+    near1 = kknn(quality~alcohol + sulphates + volatile.acidity + total.sulfur.dioxide, train_i1, test_i1, k=i, kernel = "rectangular")
+    aux1 = mean((test_i1[,12] - near1$fitted)^2)
+    
+    out_MSE1[j,i] = aux1
+  }
+  
+  used1 = union(used1, val1)
+  set1 = (1:nrow(df1))[-used1]
+
+}
+
+mMSE1 = apply(out_MSE1,2,mean)
+
+#Find best value for k
+best = which.min(mMSE)
+
+#Plot k value vs complexity of f
+plot(log(1/(1:100)), sqrt(mMSE), xlab="Complexity (log(1/k))", ylab="out-of-sample RMSE", col='blue', lwd=2, type="l", cex.lab=1.2, main=paste("kfold(",kcv,")"), ylim = range(c(.5, .75)))
+text(log(1 / best), sqrt(mMSE[best]) + .015, paste("k=",best), col = 'blue', cex = 1.2)
+lines(log(1/(1:100)), sqrt(mMSE1), col='red', lwd=2, type="l", cex.lab=1.2, main = paste("kfold(",kcv,")"))
+best1 = which.min(mMSE1)
+text(log(1 / best1), sqrt(mMSE1[best1]) - .015, paste("k=",best1), col = 'red', cex = 1.2)
+legend(-1.3, .55, legend=c("Real Data", "Normalized Data"),
+       col=c("blue", "red"), lty=1:2, cex=0.8)
+```
+Trees, Forrests, and Boosting
+```{r}
+#########################################
+#             Single Tree v1            #
+#########################################
+
+tree.df = tree(quality~., data = train, mindev = .0001)
+
+cv_df = cv.tree(tree.df, FUN = prune.tree)
+plot(cv_df, xlim = c(0,25))
+
+#Prune the tree
+tree.df.prune = prune.tree(tree.df, best = 11)
+
+#Plot the tree
+plot(tree.df.prune, type = "uniform")
+text(tree.df.prune, col = "blue", label = c("yval"), cex = .8)
+
+df.predict = predict(tree.df.prune, test)
+
+#Calculate MSE
+RMSE = sqrt(mean((test[, 12] - df.predict) ^ 2))
+RMSE
+
+```
+
+```{r}
+#########################################
+#             Single Tree v2            #
+#########################################
+
+#Split train and test sets
+ind = sample(1:nrow(df), 0.8*nrow(df))
+trn = df[ind,]
+test = df[-ind,]
+
+hist(quality, main = "Wine Quality", 
+     xlim = c(2,8), breaks = seq(from = 2, to = 9, by = 1), col = c("aquamarine"))
+
+#Create a tree using training set
+wine_tree =tree(quality~., trn)
+plot(wine_tree)
+text(wine_tree, pretty = 0)
+title(main = "Unpruned Regression Tree")
+summary(wine_tree)
+
+#Prune the tree based on the result
+wine_tree_cv = cv.tree(wine_tree)
+plot(wine_tree_cv$size, wine_tree_cv$dev, type = "b", xlab = "Tree Size", ylab = "CV-Deviance")
+
+#From the previous step, we saw the trees of size 8 to 12 work well, so we prune the tree to a size of 8
+wine_tree_pruned = prune.tree(wine_tree, best = 8)
+wine_tree_pruned
+plot(wine_tree_pruned)
+text(wine_tree_pruned,pretty = 0)
+title(main = "Pruned Regression Tree")
+
+yhat_pruned = predict(wine_tree_pruned, newdata = test)
+rmse_pruned = sqrt(mean(yhat_pruned - test$quality)^2)
+```
+
+```{r}
+#########################################
+#          Random Forest v1             #
+#########################################
+
+#Create a single random forest with 1/3 of total predictors
+RF_wine = randomForest(quality~.,data=trn, mtry=4, importance=TRUE)
+RF_wine
+plot(RF_wine)
+importance(RF_wine)
+varImpPlot(RF_wine)
+
+#Performance evaluation for random forest
+yhat_RF = predict(RF_wine, newdata = test)
+
+plot(yhat_RF,test$quality)
+title(main = "Random Forest")
+abline(1,1)
+RMSE_RF = sqrt(mean((yhat_RF-test$quality)^2))
+RF_wine
+```
+
+```{r}
+#########################################
+#          Random Forest v2             #
+#########################################
+
+#Create random forests with different ntrees and predictor combinations
+ntrees = c(100, 500, 1000, 2000)
+num_var = ncol(df) - 1
+rmse_mat = matrix(0, num_var, length(ntrees))
+
+for(i in 1:length(ntrees)){
+  for(j in 1:num_var){
+      df.rf = randomForest(quality~., data = train, mtry = j, ntree = ntrees[i])
+      pred.rf = predict(df.rf, test)
+      RMSE_rf = sqrt(mean((test[, 12] - pred.rf) ^ 2))
+      rmse_mat[j, i] = RMSE_rf
+  }
+}
+
+rmse_mat
+```
+
+```{r}
+########################################
+#  Bagging -- a special random forest  #
+########################################
+
+#Consider all predictors with mtry=11
+#%IncMSE is the most robust and informative measure. It is the increase in mse of predictions from model 1 to model j
+#More important features generate higher IncNodePurity, which is to choose where to split the tree to minimize
+#Variance of the tree
+bag_wine = randomForest(quality~.,data=trn, mtry=11, importance = TRUE)
+bag_wine
+plot(bag_wine)
+importance(bag_wine)
+varImpPlot(bag_wine)
+
+#Evaluate the bagging performance
+yhat_bag = predict(bag_wine, newdata = test)
+plot(yhat_bag,test$quality)
+title(main = "Bagging Performance")
+abline(0,1)
+RMSE_bag = sqrt(mean((yhat_bag-test$quality)^2))
+```
+
+```{r} 
+#Another bagging model with fewer features
+#Importance = True allows model to calculate importance of variables
+bag_wine_2 = randomForest(quality~.,data=trn, mtry=5, importance = TRUE)
+bag_wine_2
+plot(bag_wine_2)
+importance(bag_wine_2)
+varImpPlot(bag_wine_2)
+
+yhat_bag_2 = predict(bag_wine_2, newdata = test)
+plot(yhat_bag_2,test$quality)
+title(main = "Performance of Bagging Model 2")
+abline(0,1)
+RMSE_bag_2 = sqrt(mean((yhat_bag_2-test$quality)^2))
+```
+
+```{r}
+#########################################
+#              Boosting v1              #
+#########################################
+
+#Single boosting model with ntrees=500 and shrinkage = 0.0001
+set.seed(1)
+boost_wine_1 = gbm(quality~.,data = trn, distribution = "gaussian", n.trees=500, shrinkage = .0001,interaction.depth=4)
+yhat_boost_1 = predict(boost_wine_1, newdata = test, n.tree = 500)
+MSE_boost_1 = sqrt(mean(yhat_boost_1 - test$quality)^2)
+
+lablist.y<-as.vector(c("zero", "twenty", "forty", "sixty", "eighty"))
+summary(
+  boost_wine_1,
+  cBars = 5,
+  n.trees = boost_wine_1$n.trees,
+  plotit = TRUE,
+  order = TRUE,
+  method = relative.influence,
+)
+
+summary(boost_wine_1)
+```
+
+```{r}
+# Plot partial dependence plots for each variable
+par(mfrow=c(4,3))
+plot(boost_wine_1, i = "alcohol")
+plot(boost_wine_1, i = "sulphates")
+plot(boost_wine_1, i = "volatile.acidity")
+plot(boost_wine_1, i = "fixed.acidity")
+plot(boost_wine_1, i = "citric.acid")
+plot(boost_wine_1, i = "residual.sugar")
+plot(boost_wine_1, i = "chlorides")
+plot(boost_wine_1, i = "free.sulfur.dioxide")
+plot(boost_wine_1, i = "density")
+plot(boost_wine_1, i = "pH")
+```
+
+```{r}
+# Adjust Shrinkage (lamda), and we improve the performance of the boosting tree
+boost_wine_2 = gbm(quality~., data = trn, distribution = "gaussian", n.trees=500, shrinkage = .1, verbose = F)
+yhat_boost_2 = predict(boost_wine_2, newdata = test, n.tree = 500)
+MSE_boost_2 = sqrt(mean(yhat_boost_2 - test$quality)^2)
+boost_wine_2
+```
+
+```{r}
+#########################################
+#              Boosting v2              #
+#########################################
+
+#Create initial boosting model with gbm
+df.boost = gbm(quality~., data = train, distribution = 'gaussian', n.trees = 10000, shrinkage = .001, interaction.depth = 4)
+
+#Summarize model
+summary(df.boost)
+```
+
+```{r}
+#Create multiple bossting models to account for different ntree and depth values
+ntrees_b = c(1000, 5000, 10000)
+depth_b = c(4:10)
+rmse_boost = matrix(0, length(depth_b), length(ntrees_b))
+for(i in 1:length(ntrees_b)){
+  for(j in 1:length(depth_b)){
+    df.boost = gbm(quality~., data = train, distribution = 'gaussian', n.trees = ntrees_b[i], shrinkage = .001, interaction.depth = depth_b[j])
+    pred.boost = predict(df.boost, test)
+    RMSE_boost = sqrt(mean((test[, 12] - pred.boost) ^ 2))
+    rmse_boost[j, i] = RMSE_boost
+  }
+}
+
+rmse_boost
+```
+
+```{r}
+#Test different shrinkage values on boosting models
+test_shrink = c(.001, .005, .01)
+rmse_boost2 = c(0, 0, 0)
+for(i in 1:length(test_shrink)){
+  df.boost = gbm(quality~., data = train, distribution = 'gaussian', n.trees = 10000, shrinkage = test_shrink[i], interaction.depth = 7)
+  pred.boost = predict(df.boost, test)
+  RMSE_boost = sqrt(mean((test[, 12] - pred.boost) ^ 2))
+  rmse_boost2[i] = RMSE_boost
+}
+
+rmse_boost2
+```
+Regression
+```{r}
+#Performing regression on the training set
+regfit.full = regsubsets(quality~.,data=df, nvmax = 12)
+reg.summary = summary(regfit.full)
+
+par(mfrow=c(2,2))
+plot(reg.summary$rss,xlab="Number of Variables",ylab="RSS",type="l")
+
+plot(reg.summary$adjr2,xlab="Number of Variables",ylab="Adjusted RSq",type="l")
+points(which.max(reg.summary$adjr2),reg.summary$adjr2[which.max(reg.summary$adjr2)],col="red",cex=2,pch=20)
+
+plot(reg.summary$cp,xlab="Number of Variables",ylab="Cp",type="l")
+points(which.min(reg.summary$cp),reg.summary$cp[which.min(reg.summary$cp)],col="red",cex=2,pch=20)
+
+
+plot(reg.summary$bic,xlab="Number of Variables",ylab="BIC",types="l")
+points(which.min(reg.summary$bic),reg.summary$bic[which.min(reg.summary$bic)],col="red",cex=2,pch=20)
+```
+
+```{r}
+#Validation set approach
+#Dividing data set into train and test
+set.seed(1)
+train=sample(c(TRUE, FALSE), nrow(df), rep=TRUE)
+test=(!train)
+
+regfit.best = regsubsets(quality~.,data=df[train,], nvmax = 12)
+
+#create model matrix on test data
+test.mat=model.matrix(quality~.,data=df[test,])
+```
+
+```{r}
+#Performing regression on the training set
+regfit.best = regsubsets(quality~.,data=df[train,], nvmax = 12)
+```
+
+```{r}
+#Create model matrix on test data
+test.mat=model.matrix(quality~.,data=df[test,])
+
+#Now we run a loop, and for each size i,we extract the coefficients from regfit.best for the best model of that size, multiply them into the appropriate columns of the test model matrix to
+#Form the predictions, and compute the test MSE.
+val.errors=rep(NA, 12)
+for(i in 1:11){
+  coefi=coef(regfit.best, id=i)
+  pred=test.mat[, names(coefi)]%*%coefi
+  val.errors[i]=mean((df$quality[test]-pred)^2)
+}
+val.errors[which.min(val.errors)]
+which.min(val.errors)
+coef(regfit.best, which.min(val.errors))
+```
+
+```{r}
+#Performing subset selection on the entire data set
+regfit.best=regsubsets(quality~., data = df, nvmax = 7)
+coef(regfit.best, 7)
+```
